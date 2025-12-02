@@ -366,9 +366,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy
 				finishReason = message.FinishReasonToolUse
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
-			a.updateSessionUsage(a.largeModel, &currentSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
+			updatedSession, getSessionErr := a.sessions.Get(genCtx, call.SessionID)
+			if getSessionErr != nil {
+				return getSessionErr
+			}
+			a.updateSessionUsage(a.largeModel, &updatedSession, stepResult.Usage, a.openrouterCost(stepResult.ProviderMetadata))
 			sessionLock.Lock()
-			_, sessionErr := a.sessions.Save(genCtx, currentSession)
+			_, sessionErr := a.sessions.Save(genCtx, updatedSession)
 			sessionLock.Unlock()
 			if sessionErr != nil {
 				return sessionErr

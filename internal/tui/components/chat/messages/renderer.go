@@ -179,6 +179,7 @@ func init() {
 	registry.register(tools.LSToolName, func() renderer { return lsRenderer{} })
 	registry.register(tools.SourcegraphToolName, func() renderer { return sourcegraphRenderer{} })
 	registry.register(tools.DiagnosticsToolName, func() renderer { return diagnosticsRenderer{} })
+	registry.register(tools.TodosToolName, func() renderer { return todosRenderer{} })
 	registry.register(agent.AgentToolName, func() renderer { return agentRenderer{} })
 }
 
@@ -1189,6 +1190,8 @@ func prettifyToolName(name string) string {
 		return "List"
 	case tools.SourcegraphToolName:
 		return "Sourcegraph"
+	case tools.TodosToolName:
+		return "Todos"
 	case tools.ViewToolName:
 		return "View"
 	case tools.WriteToolName:
@@ -1196,4 +1199,89 @@ func prettifyToolName(name string) string {
 	default:
 		return name
 	}
+}
+
+// -----------------------------------------------------------------------------
+//  Todos renderer
+// -----------------------------------------------------------------------------
+
+// todosRenderer handles displaying the todo list with status indicators
+type todosRenderer struct {
+	baseRenderer
+}
+
+// Render displays todos in a structured list format with status icons
+func (tr todosRenderer) Render(v *toolCallCmp) string {
+	t := styles.CurrentTheme()
+	var params tools.TodosParams
+	var args []string
+	if err := tr.unmarshalParams(v.call.Input, &params); err == nil {
+		pendingCount := 0
+		inProgressCount := 0
+		completedCount := 0
+
+		for _, todo := range params.Todos {
+			switch todo.Status {
+			case "pending":
+				pendingCount++
+			case "in_progress":
+				inProgressCount++
+			case "completed":
+				completedCount++
+			}
+		}
+
+		args = newParamBuilder().
+			addMain(fmt.Sprintf("%d tasks", len(params.Todos))).
+			addKeyValue("pending", fmt.Sprintf("%d", pendingCount)).
+			addKeyValue("in_progress", fmt.Sprintf("%d", inProgressCount)).
+			addKeyValue("completed", fmt.Sprintf("%d", completedCount)).
+			build()
+	}
+
+	return tr.renderWithParams(v, "Todos", args, func() string {
+		var params tools.TodosParams
+		if err := tr.unmarshalParams(v.call.Input, &params); err != nil {
+			return renderPlainContent(v, v.result.Content)
+		}
+
+		if len(params.Todos) == 0 {
+			return t.S().Base.Foreground(t.FgSubtle).Render("No tasks")
+		}
+
+		var lines []string
+		for _, todo := range params.Todos {
+			icon := "○" // pending
+			iconColor := t.FgMuted
+			textColor := t.FgBase
+
+			switch todo.Status {
+			case "in_progress":
+				icon = "◐"
+				iconColor = t.Blue
+				textColor = t.Blue
+			case "completed":
+				icon = "●"
+				iconColor = t.Green
+				textColor = t.FgSubtle
+			}
+
+			statusIcon := t.S().Base.Foreground(iconColor).Render(icon)
+
+			// Display active form if in progress, otherwise content
+			displayText := todo.Content
+			if todo.Status == "in_progress" && todo.ActiveForm != "" {
+				displayText = todo.ActiveForm
+			}
+
+			todoText := t.S().Base.Foreground(textColor).Render(displayText)
+			lines = append(lines, fmt.Sprintf("%s %s", statusIcon, todoText))
+		}
+
+		width := v.textWidth() - 2
+		result := strings.Join(lines, "\n")
+		return t.S().Base.
+			Width(width).
+			Render(result)
+	})
 }
