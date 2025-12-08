@@ -48,6 +48,7 @@ type Coordinator interface {
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
+	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string) error
 	Model() Model
@@ -765,6 +766,10 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {
 	return c.currentAgent.QueuedPrompts(sessionID)
+}
+
+func (c *coordinator) QueuedPromptsList(sessionID string) []string {
+	return c.currentAgent.QueuedPromptsList(sessionID)
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {

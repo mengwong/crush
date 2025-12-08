@@ -24,6 +24,14 @@ type TodoItem struct {
 	ActiveForm string `json:"active_form" description:"Present continuous form (e.g., 'Running tests')"`
 }
 
+type TodosResponseMetadata struct {
+	IsNew         bool     `json:"is_new"`
+	JustCompleted []string `json:"just_completed,omitempty"`
+	JustStarted   string   `json:"just_started,omitempty"`
+	Completed     int      `json:"completed"`
+	Total         int      `json:"total"`
+}
+
 func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		TodosToolName,
@@ -34,35 +42,69 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for managing todos")
 			}
 
-			// Get current session
+			// Get current session.
 			currentSession, err := sessions.Get(ctx, sessionID)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to get session: %w", err)
 			}
 
-			// Convert TodoItems to session.Todo
+			// Check if this is a new todo list (no existing todos).
+			isNew := len(currentSession.Todos) == 0
+
+			// Build map of old todos by content for change detection.
+			oldStatusByContent := make(map[string]session.TodoStatus)
+			for _, todo := range currentSession.Todos {
+				oldStatusByContent[todo.Content] = todo.Status
+			}
+
+			// Convert TodoItems to session.Todo and detect changes.
 			todos := make([]session.Todo, len(params.Todos))
+			var justCompleted []string
+			var justStarted string
+			completedCount := 0
+
 			for i, item := range params.Todos {
 				todos[i] = session.Todo{
 					Content:    item.Content,
 					Status:     session.TodoStatus(item.Status),
 					ActiveForm: item.ActiveForm,
 				}
+
+				newStatus := session.TodoStatus(item.Status)
+				oldStatus, existed := oldStatusByContent[item.Content]
+
+				// Track newly completed tasks.
+				if newStatus == session.TodoStatusCompleted {
+					completedCount++
+					if existed && oldStatus != session.TodoStatusCompleted {
+						justCompleted = append(justCompleted, item.Content)
+					}
+				}
+
+				// Track newly started task.
+				if newStatus == session.TodoStatusInProgress {
+					if !existed || oldStatus != session.TodoStatusInProgress {
+						if item.ActiveForm != "" {
+							justStarted = item.ActiveForm
+						} else {
+							justStarted = item.Content
+						}
+					}
+				}
 			}
 
-			// Update session with new todos
+			// Update session with new todos.
 			currentSession.Todos = todos
 			_, err = sessions.Save(ctx, currentSession)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to save todos: %w", err)
 			}
 
-			// Build response showing current state
+			// Build response showing current state.
 			response := "Todo list updated successfully.\n\n"
 
 			pendingCount := 0
 			inProgressCount := 0
-			completedCount := 0
 
 			for _, todo := range todos {
 				switch todo.Status {
@@ -70,14 +112,20 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 					pendingCount++
 				case session.TodoStatusInProgress:
 					inProgressCount++
-				case session.TodoStatusCompleted:
-					completedCount++
 				}
 			}
 
 			response += fmt.Sprintf("Status: %d pending, %d in progress, %d completed\n",
 				pendingCount, inProgressCount, completedCount)
 
-			return fantasy.NewTextResponse(response), nil
+			metadata := TodosResponseMetadata{
+				IsNew:         isNew,
+				JustCompleted: justCompleted,
+				JustStarted:   justStarted,
+				Completed:     completedCount,
+				Total:         len(todos),
+			}
+
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		})
 }

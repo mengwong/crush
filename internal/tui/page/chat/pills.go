@@ -9,11 +9,9 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/styles"
 )
 
-const (
-	pillHeight = 3 // Height of pills including border
-)
+const pillHeightWithBorder = 3
 
-func queuePill(queue int, t *styles.Theme) string {
+func queuePill(queue int, focused, pillsPanelFocused bool, t *styles.Theme) string {
 	if queue <= 0 {
 		return ""
 	}
@@ -22,24 +20,22 @@ func queuePill(queue int, t *styles.Theme) string {
 		triangles = triangles[:queue]
 	}
 
-	allTriangles := strings.Join(triangles, "")
+	content := fmt.Sprintf("%s %d Queued", strings.Join(triangles, ""), queue)
 
-	return t.S().Base.
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(t.BgOverlay).
-		PaddingLeft(1).
-		PaddingRight(1).
-		Render(fmt.Sprintf("%s %d Queued", allTriangles, queue))
+	style := t.S().Base.PaddingLeft(1).PaddingRight(1)
+	if !pillsPanelFocused || focused {
+		style = style.BorderStyle(lipgloss.RoundedBorder()).BorderForeground(t.BgOverlay)
+	} else {
+		style = style.BorderStyle(lipgloss.HiddenBorder())
+	}
+	return style.Render(content)
 }
 
-// todoPill renders a pill showing todo progress and current task.
-// spinnerView is the current spinner frame (only shown if there's an in-progress todo).
-func todoPill(todos []session.Todo, spinnerView string, t *styles.Theme) string {
+func todoPill(todos []session.Todo, spinnerView string, focused, pillsPanelFocused bool, t *styles.Theme) string {
 	if len(todos) == 0 {
 		return ""
 	}
 
-	// Count completed and find current in-progress todo
 	completed := 0
 	var currentTodo *session.Todo
 	for i := range todos {
@@ -54,50 +50,114 @@ func todoPill(todos []session.Todo, spinnerView string, t *styles.Theme) string 
 	}
 
 	total := len(todos)
+	allDone := completed == total
 
-	// Build the content
-	label := t.S().Base.Foreground(t.FgMuted).Render("To-Do")
-	progress := t.S().Base.Foreground(t.FgMuted).Render(fmt.Sprintf("%d/%d", completed, total))
+	var prefix string
+	if allDone {
+		prefix = t.S().Base.Foreground(t.Green).Render("✓") + " "
+	}
+
+	label := "To-Do"
+	progress := fmt.Sprintf("%d/%d", completed, total)
 
 	var content string
-	if currentTodo != nil {
-		// Show spinner and task text when in progress
+	if pillsPanelFocused {
+		content = fmt.Sprintf("%s%s %s", prefix, label, progress)
+	} else if currentTodo != nil {
 		taskText := currentTodo.Content
 		if currentTodo.ActiveForm != "" {
 			taskText = currentTodo.ActiveForm
 		}
-		// Truncate if too long
-		maxTaskLen := 40
-		if len(taskText) > maxTaskLen {
-			taskText = taskText[:maxTaskLen-1] + "…"
+		if len(taskText) > 40 {
+			taskText = taskText[:39] + "…"
 		}
 		task := t.S().Base.Foreground(t.FgSubtle).Render(taskText)
 		content = fmt.Sprintf("%s %s %s  %s", spinnerView, label, progress, task)
 	} else {
-		// No spinner or task text when nothing in progress
-		icon := t.S().Base.Foreground(t.FgMuted).Render("∴")
-		content = fmt.Sprintf("%s %s %s", icon, label, progress)
+		content = fmt.Sprintf("%s%s %s", prefix, label, progress)
 	}
 
-	return t.S().Base.
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(t.BgOverlay).
-		PaddingLeft(1).
-		PaddingRight(1).
-		Render(content)
+	style := t.S().Base.PaddingLeft(1).PaddingRight(1)
+	if !pillsPanelFocused || focused {
+		style = style.BorderStyle(lipgloss.RoundedBorder()).BorderForeground(t.BgOverlay)
+	} else {
+		style = style.BorderStyle(lipgloss.HiddenBorder())
+	}
+	return style.Render(content)
 }
 
-// addPillSpacing adds spacing between pills for display.
-func addPillSpacing(pills []string) []string {
-	if len(pills) <= 1 {
-		return pills
+// todoList renders the expanded todo list. Sorted: completed, in-progress, pending.
+func todoList(todos []session.Todo, spinnerView string, t *styles.Theme) string {
+	if len(todos) == 0 {
+		return ""
 	}
-	result := make([]string, 0, len(pills)*2-1)
-	for i, pill := range pills {
-		result = append(result, pill)
-		if i < len(pills)-1 {
-			result = append(result, "  ")
+
+	sorted := make([]session.Todo, len(todos))
+	copy(sorted, todos)
+	sortTodos(sorted)
+
+	var lines []string
+	for _, todo := range sorted {
+		var prefix string
+		var textStyle lipgloss.Style
+
+		switch todo.Status {
+		case session.TodoStatusCompleted:
+			prefix = t.S().Base.Foreground(t.FgMuted).Render("  ✓") + " "
+			textStyle = t.S().Base.Foreground(t.FgMuted)
+		case session.TodoStatusInProgress:
+			prefix = "  " + spinnerView + " "
+			textStyle = t.S().Base.Foreground(t.GreenDark)
+		default:
+			prefix = t.S().Base.Foreground(t.FgMuted).Render("  •") + " "
+			textStyle = t.S().Base.Foreground(t.FgBase)
+		}
+
+		text := todo.Content
+		if todo.Status == session.TodoStatusInProgress && todo.ActiveForm != "" {
+			text = todo.ActiveForm
+		}
+
+		lines = append(lines, prefix+textStyle.Render(text))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func sortTodos(todos []session.Todo) {
+	statusOrder := func(s session.TodoStatus) int {
+		switch s {
+		case session.TodoStatusCompleted:
+			return 0
+		case session.TodoStatusInProgress:
+			return 1
+		default:
+			return 2
 		}
 	}
-	return result
+	for i := 0; i < len(todos)-1; i++ {
+		for j := i + 1; j < len(todos); j++ {
+			if statusOrder(todos[i].Status) > statusOrder(todos[j].Status) {
+				todos[i], todos[j] = todos[j], todos[i]
+			}
+		}
+	}
+}
+
+func queueList(queueItems []string, t *styles.Theme) string {
+	if len(queueItems) == 0 {
+		return ""
+	}
+
+	var lines []string
+	for _, item := range queueItems {
+		text := item
+		if len(text) > 60 {
+			text = text[:59] + "…"
+		}
+		prefix := t.S().Base.Foreground(t.FgMuted).Render("  •") + " "
+		lines = append(lines, prefix+t.S().Base.Foreground(t.FgMuted).Render(text))
+	}
+
+	return strings.Join(lines, "\n")
 }

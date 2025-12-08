@@ -218,9 +218,7 @@ func (m *messageListCmp) View() string {
 		Padding(1, 1, 0, 1).
 		Width(m.width).
 		Height(m.height).
-		Render(
-			m.listCmp.View(),
-		)
+		Render(m.listCmp.View())
 }
 
 func (m *messageListCmp) handlePermissionRequest(permission permission.PermissionNotification) tea.Cmd {

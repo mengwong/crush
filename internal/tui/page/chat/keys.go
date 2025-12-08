@@ -9,7 +9,13 @@ type KeyMap struct {
 	AddAttachment key.Binding
 	Cancel        key.Binding
 	Tab           key.Binding
+	ShiftTab      key.Binding
 	Details       key.Binding
+}
+
+type PillsKeyMap struct {
+	Left  key.Binding
+	Right key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -30,9 +36,26 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
 		),
+		ShiftTab: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "change focus"),
+		),
 		Details: key.NewBinding(
 			key.WithKeys("ctrl+d"),
 			key.WithHelp("ctrl+d", "toggle details"),
+		),
+	}
+}
+
+func DefaultPillsKeyMap() PillsKeyMap {
+	return PillsKeyMap{
+		Left: key.NewBinding(
+			key.WithKeys("left"),
+			key.WithHelp("←/→", "section"),
+		),
+		Right: key.NewBinding(
+			key.WithKeys("right"),
+			key.WithHelp("←/→", "section"),
 		),
 	}
 }

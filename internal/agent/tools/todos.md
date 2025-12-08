@@ -21,6 +21,18 @@ Skip this tool when:
 - Purely conversational or informational request
 </when_not_to_use>
 
+<first_time_creation>
+When creating a todo list for the first time in a session, ALWAYS follow up with a brief message listing the todos you created. This helps the user understand your plan. Example:
+
+"I've created a todo list to track this work:
+1. Set up database schema
+2. Implement API endpoints
+3. Add authentication
+4. Write tests
+
+Starting with the database schema."
+</first_time_creation>
+
 <task_states>
 - **pending**: Task not yet started
 - **in_progress**: Currently working on (limit to ONE task at a time)

@@ -64,6 +64,7 @@ type SessionAgent interface {
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
 	QueuedPrompts(sessionID string) int
+	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
 	Summarize(context.Context, string, fantasy.ProviderOptions) error
 	Model() Model
@@ -876,6 +877,18 @@ func (a *sessionAgent) QueuedPrompts(sessionID string) int {
 		return 0
 	}
 	return len(l)
+}
+
+func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
+	l, ok := a.messageQueue.Get(sessionID)
+	if !ok {
+		return nil
+	}
+	prompts := make([]string, len(l))
+	for i, call := range l {
+		prompts[i] = call.Prompt
+	}
+	return prompts
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {

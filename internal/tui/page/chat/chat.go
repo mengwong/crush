@@ -55,6 +55,15 @@ const (
 	PanelTypeChat   PanelType = "chat"
 	PanelTypeEditor PanelType = "editor"
 	PanelTypeSplash PanelType = "splash"
+	PanelTypePills  PanelType = "pills"
+)
+
+// PillSection represents which pill section is focused when in pills panel.
+type PillSection int
+
+const (
+	PillSectionTodos PillSection = iota
+	PillSectionQueue
 )
 
 const (
@@ -100,8 +109,9 @@ type chatPage struct {
 	focusedPane  PanelType
 
 	// Session
-	session session.Session
-	keyMap  KeyMap
+	session     session.Session
+	keyMap      KeyMap
+	pillsKeyMap PillsKeyMap
 
 	// Components
 	header  header.Header
@@ -118,6 +128,9 @@ type chatPage struct {
 	isProjectInit    bool
 	promptQueue      int
 
+	// Pills state
+	focusedPillSection PillSection
+
 	// Todo spinner
 	todoSpinner spinner.Model
 }
@@ -127,6 +140,7 @@ func New(app *app.App) ChatPage {
 	return &chatPage{
 		app:         app,
 		keyMap:      DefaultKeyMap(),
+		pillsKeyMap: DefaultPillsKeyMap(),
 		header:      header.New(app.LSPClients),
 		sidebar:     sidebar.New(app.History, app.LSPClients, false),
 		chat:        chat.New(app),
@@ -284,18 +298,15 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		p.editor = u.(editor.Editor)
 		return p, cmd
 	case pubsub.Event[session.Session]:
-		// Update local session if this event is for our session
 		if msg.Payload.ID == p.session.ID {
 			prevHasTodos := len(p.session.Todos) > 0
 			prevHasInProgress := p.hasInProgressTodo()
 			p.session = msg.Payload
 			newHasTodos := len(p.session.Todos) > 0
 			newHasInProgress := p.hasInProgressTodo()
-			// Resize if todo visibility changed
 			if prevHasTodos != newHasTodos {
 				cmds = append(cmds, p.SetSize(p.width, p.height))
 			}
-			// Start spinner if todo went in-progress
 			if !prevHasInProgress && newHasInProgress {
 				cmds = append(cmds, p.todoSpinner.Tick)
 			}
@@ -430,8 +441,12 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 				p.splash = u.(splash.Splash)
 				return p, cmd
 			}
-			p.changeFocus()
-			return p, nil
+			return p, p.changeFocus(false)
+		case key.Matches(msg, p.keyMap.ShiftTab):
+			if p.session.ID == "" {
+				return p, nil
+			}
+			return p, p.changeFocus(true)
 		case key.Matches(msg, p.keyMap.Cancel):
 			if p.session.ID != "" && p.app.AgentCoordinator.IsBusy() {
 				return p, p.cancel()
@@ -454,6 +469,8 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 			u, cmd := p.splash.Update(msg)
 			p.splash = u.(splash.Splash)
 			cmds = append(cmds, cmd)
+		case PanelTypePills:
+			cmds = append(cmds, p.handlePillsKeyPress(msg))
 		}
 	case tea.PasteMsg:
 		switch p.focusedPane {
@@ -513,33 +530,61 @@ func (p *chatPage) View() string {
 		messagesView := p.chat.View()
 		editorView := p.editor.View()
 
-		// Build pills row (todo first, then queue)
+		hasTodos := len(p.session.Todos) > 0
+		hasQueue := p.promptQueue > 0
+		pillsFocused := p.focusedPane == PanelTypePills
+		todosFocused := pillsFocused && p.focusedPillSection == PillSectionTodos
+		queueFocused := pillsFocused && p.focusedPillSection == PillSectionQueue
+
 		var pills []string
-		if len(p.session.Todos) > 0 {
-			pills = append(pills, todoPill(p.session.Todos, p.todoSpinner.View(), t))
+		if hasTodos {
+			pills = append(pills, todoPill(p.session.Todos, p.todoSpinner.View(), todosFocused, pillsFocused, t))
 		}
-		if p.promptQueue > 0 {
-			pills = append(pills, queuePill(p.promptQueue, t))
+		if hasQueue {
+			pills = append(pills, queuePill(p.promptQueue, queueFocused, pillsFocused, t))
+		}
+
+		var expandedList string
+		if pillsFocused {
+			if todosFocused && hasTodos {
+				expandedList = todoList(p.session.Todos, p.todoSpinner.View(), t)
+			} else if queueFocused && hasQueue {
+				queueItems := p.app.AgentCoordinator.QueuedPromptsList(p.session.ID)
+				expandedList = queueList(queueItems, t)
+			}
+		}
+
+		var pillsArea string
+		if len(pills) > 0 {
+			pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
+			if expandedList != "" {
+				pillsArea = lipgloss.JoinVertical(
+					lipgloss.Left,
+					pillsRow,
+					expandedList,
+				)
+			} else {
+				pillsArea = pillsRow
+			}
+			pillsArea = t.S().Base.PaddingLeft(4).PaddingTop(1).Render(pillsArea)
 		}
 
 		if p.compact {
 			headerView := p.header.View()
 			views := []string{headerView, messagesView}
-			if len(pills) > 0 {
-				pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, addPillSpacing(pills)...)
-				views = append(views, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(pillsRow))
+			if pillsArea != "" {
+				views = append(views, pillsArea)
 			}
 			views = append(views, editorView)
 			chatView = lipgloss.JoinVertical(lipgloss.Left, views...)
 		} else {
 			sidebarView := p.sidebar.View()
 			var messagesColumn string
-			if len(pills) > 0 {
-				pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, addPillSpacing(pills)...)
+			if pillsArea != "" {
 				messagesColumn = lipgloss.JoinVertical(
 					lipgloss.Left,
 					messagesView,
-					t.S().Base.PaddingLeft(4).PaddingTop(1).Render(pillsRow),
+					pillsArea,
 				)
 			} else {
 				messagesColumn = messagesView
@@ -710,20 +755,31 @@ func (p *chatPage) SetSize(width, height int) tea.Cmd {
 			cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
 		}
 	} else {
-		pillsHeight := 0
 		hasTodos := len(p.session.Todos) > 0
-		hasPills := p.promptQueue > 0 || hasTodos
+		hasQueue := p.promptQueue > 0
+		hasPills := hasTodos || hasQueue
+		pillsFocused := p.focusedPane == PanelTypePills
+
+		pillsAreaHeight := 0
 		if hasPills {
-			pillsHeight = pillHeight + 1 // +1 for padding top
+			pillsAreaHeight = pillHeightWithBorder + 1 // +1 for padding top
+			if pillsFocused {
+				if p.focusedPillSection == PillSectionTodos && hasTodos {
+					pillsAreaHeight += len(p.session.Todos)
+				} else if p.focusedPillSection == PillSectionQueue && hasQueue {
+					pillsAreaHeight += p.promptQueue
+				}
+			}
 		}
+
 		if p.compact {
-			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight-pillsHeight))
+			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight-pillsAreaHeight))
 			p.detailsWidth = width - DetailsPositioning
 			cmds = append(cmds, p.sidebar.SetSize(p.detailsWidth-LeftRightBorders, p.detailsHeight-TopBottomBorders))
 			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
 			cmds = append(cmds, p.header.SetWidth(width-BorderWidth))
 		} else {
-			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight-pillsHeight))
+			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight-pillsAreaHeight))
 			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
 			cmds = append(cmds, p.sidebar.SetSize(SideBarWidth, height-EditorHeight))
 		}
@@ -756,7 +812,6 @@ func (p *chatPage) setSession(sess session.Session) tea.Cmd {
 	var cmds []tea.Cmd
 	p.session = sess
 
-	// Start spinner if there's an in-progress todo
 	if p.hasInProgressTodo() {
 		cmds = append(cmds, p.todoSpinner.Tick)
 	}
@@ -770,20 +825,69 @@ func (p *chatPage) setSession(sess session.Session) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-func (p *chatPage) changeFocus() {
+func (p *chatPage) changeFocus(reverse bool) tea.Cmd {
 	if p.session.ID == "" {
-		return
+		return nil
 	}
-	switch p.focusedPane {
-	case PanelTypeChat:
-		p.focusedPane = PanelTypeEditor
-		p.editor.Focus()
-		p.chat.Blur()
-	case PanelTypeEditor:
-		p.focusedPane = PanelTypeChat
-		p.chat.Focus()
-		p.editor.Blur()
+
+	hasPills := len(p.session.Todos) > 0 || p.promptQueue > 0
+	wasPillsFocused := p.focusedPane == PanelTypePills
+
+	if reverse {
+		switch p.focusedPane {
+		case PanelTypeEditor:
+			p.focusedPane = PanelTypeChat
+			p.chat.Focus()
+			p.editor.Blur()
+		case PanelTypeChat:
+			if hasPills {
+				p.focusedPane = PanelTypePills
+				p.chat.Blur()
+				if len(p.session.Todos) > 0 {
+					p.focusedPillSection = PillSectionTodos
+				} else {
+					p.focusedPillSection = PillSectionQueue
+				}
+			} else {
+				p.focusedPane = PanelTypeEditor
+				p.editor.Focus()
+				p.chat.Blur()
+			}
+		case PanelTypePills:
+			p.focusedPane = PanelTypeEditor
+			p.editor.Focus()
+		}
+	} else {
+		switch p.focusedPane {
+		case PanelTypeEditor:
+			if hasPills {
+				p.focusedPane = PanelTypePills
+				p.editor.Blur()
+				if len(p.session.Todos) > 0 {
+					p.focusedPillSection = PillSectionTodos
+				} else {
+					p.focusedPillSection = PillSectionQueue
+				}
+			} else {
+				p.focusedPane = PanelTypeChat
+				p.chat.Focus()
+				p.editor.Blur()
+			}
+		case PanelTypePills:
+			p.focusedPane = PanelTypeChat
+			p.chat.Focus()
+		case PanelTypeChat:
+			p.focusedPane = PanelTypeEditor
+			p.editor.Focus()
+			p.chat.Blur()
+		}
 	}
+
+	isPillsFocused := p.focusedPane == PanelTypePills
+	if hasPills && (wasPillsFocused != isPillsFocused) {
+		return p.SetSize(p.width, p.height)
+	}
+	return nil
 }
 
 func (p *chatPage) cancel() tea.Cmd {
@@ -849,6 +953,25 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 		return nil
 	})
 	return tea.Batch(cmds...)
+}
+
+func (p *chatPage) handlePillsKeyPress(msg tea.KeyPressMsg) tea.Cmd {
+	hasTodos := len(p.session.Todos) > 0
+	hasQueue := p.promptQueue > 0
+
+	switch {
+	case key.Matches(msg, p.pillsKeyMap.Left):
+		if p.focusedPillSection == PillSectionQueue && hasTodos {
+			p.focusedPillSection = PillSectionTodos
+			return p.SetSize(p.width, p.height)
+		}
+	case key.Matches(msg, p.pillsKeyMap.Right):
+		if p.focusedPillSection == PillSectionTodos && hasQueue {
+			p.focusedPillSection = PillSectionQueue
+			return p.SetSize(p.width, p.height)
+		}
+	}
+	return nil
 }
 
 func (p *chatPage) Bindings() []key.Binding {
@@ -1069,14 +1192,41 @@ func (p *chatPage) Help() help.KeyMap {
 		globalBindings := []key.Binding{}
 		// we are in a session
 		if p.session.ID != "" {
-			tabKey := key.NewBinding(
-				key.WithKeys("tab"),
-				key.WithHelp("tab", "focus chat"),
-			)
-			if p.focusedPane == PanelTypeChat {
+			var tabKey key.Binding
+			switch p.focusedPane {
+			case PanelTypeEditor:
+				hasTodos := len(p.session.Todos) > 0
+				hasQueue := p.promptQueue > 0
+				if hasTodos {
+					tabKey = key.NewBinding(
+						key.WithKeys("tab"),
+						key.WithHelp("tab", "focus todos"),
+					)
+				} else if hasQueue {
+					tabKey = key.NewBinding(
+						key.WithKeys("tab"),
+						key.WithHelp("tab", "focus queued"),
+					)
+				} else {
+					tabKey = key.NewBinding(
+						key.WithKeys("tab"),
+						key.WithHelp("tab", "focus chat"),
+					)
+				}
+			case PanelTypePills:
+				tabKey = key.NewBinding(
+					key.WithKeys("tab"),
+					key.WithHelp("tab", "focus chat"),
+				)
+			case PanelTypeChat:
 				tabKey = key.NewBinding(
 					key.WithKeys("tab"),
 					key.WithHelp("tab", "focus editor"),
+				)
+			default:
+				tabKey = key.NewBinding(
+					key.WithKeys("tab"),
+					key.WithHelp("tab", "focus chat"),
 				)
 			}
 			shortList = append(shortList, tabKey)
@@ -1216,6 +1366,15 @@ func (p *chatPage) Help() help.KeyMap {
 					),
 				})
 			}
+		case PanelTypePills:
+			shortList = append(shortList,
+				p.pillsKeyMap.Left,
+			)
+			fullList = append(fullList,
+				[]key.Binding{
+					p.pillsKeyMap.Left,
+				},
+			)
 		}
 		shortList = append(shortList,
 			// Quit
@@ -1269,7 +1428,6 @@ func (p *chatPage) isMouseOverChat(x, y int) bool {
 	return x >= chatX && x < chatX+chatWidth && y >= chatY && y < chatY+chatHeight
 }
 
-// hasInProgressTodo returns true if there is at least one todo in progress.
 func (p *chatPage) hasInProgressTodo() bool {
 	for _, todo := range p.session.Todos {
 		if todo.Status == session.TodoStatusInProgress {

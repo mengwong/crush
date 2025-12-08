@@ -1210,78 +1210,86 @@ type todosRenderer struct {
 	baseRenderer
 }
 
-// Render displays todos in a structured list format with status icons
+// Render displays a summary of todos based on action type.
 func (tr todosRenderer) Render(v *toolCallCmp) string {
 	t := styles.CurrentTheme()
 	var params tools.TodosParams
-	var args []string
-	if err := tr.unmarshalParams(v.call.Input, &params); err == nil {
-		pendingCount := 0
-		inProgressCount := 0
-		completedCount := 0
+	var meta tools.TodosResponseMetadata
+	var headerText string
+	var bodyLines []string
 
+	// Parse params for pending state (before result is available).
+	if err := tr.unmarshalParams(v.call.Input, &params); err == nil {
+		completedCount := 0
+		inProgressTask := ""
 		for _, todo := range params.Todos {
-			switch todo.Status {
-			case "pending":
-				pendingCount++
-			case "in_progress":
-				inProgressCount++
-			case "completed":
+			if todo.Status == "completed" {
 				completedCount++
 			}
+			if todo.Status == "in_progress" {
+				if todo.ActiveForm != "" {
+					inProgressTask = todo.ActiveForm
+				} else {
+					inProgressTask = todo.Content
+				}
+			}
 		}
 
-		args = newParamBuilder().
-			addMain(fmt.Sprintf("%d tasks", len(params.Todos))).
-			addKeyValue("pending", fmt.Sprintf("%d", pendingCount)).
-			addKeyValue("in_progress", fmt.Sprintf("%d", inProgressCount)).
-			addKeyValue("completed", fmt.Sprintf("%d", completedCount)).
-			build()
+		// Default display from params (used when pending or no metadata).
+		headerText = fmt.Sprintf("%d/%d", completedCount, len(params.Todos))
+		if inProgressTask != "" {
+			headerText = fmt.Sprintf("%d/%d · %s", completedCount, len(params.Todos), inProgressTask)
+		}
+
+		// If we have metadata, use it for richer display.
+		if v.result.Metadata != "" {
+			if err := tr.unmarshalParams(v.result.Metadata, &meta); err == nil {
+				if meta.IsNew {
+					if meta.JustStarted != "" {
+						headerText = fmt.Sprintf("created %d todos, starting first", meta.Total)
+						line := t.S().Base.Foreground(t.Blue).Render("→ ") +
+							t.S().Base.Foreground(t.FgBase).Render(meta.JustStarted)
+						bodyLines = append(bodyLines, line)
+					} else {
+						headerText = fmt.Sprintf("created %d todos", meta.Total)
+					}
+				} else {
+					// Build header based on what changed.
+					hasCompleted := len(meta.JustCompleted) > 0
+					hasStarted := meta.JustStarted != ""
+
+					if hasCompleted && hasStarted {
+						headerText = fmt.Sprintf("%d/%d · completed %d, starting next", meta.Completed, meta.Total, len(meta.JustCompleted))
+					} else if hasCompleted {
+						headerText = fmt.Sprintf("%d/%d · completed %d", meta.Completed, meta.Total, len(meta.JustCompleted))
+					} else if hasStarted {
+						headerText = fmt.Sprintf("%d/%d · starting task", meta.Completed, meta.Total)
+					} else {
+						headerText = fmt.Sprintf("%d/%d", meta.Completed, meta.Total)
+					}
+
+					// Build body with details.
+					for _, task := range meta.JustCompleted {
+						line := t.S().Base.Foreground(t.Green).Render("✓ ") +
+							t.S().Base.Foreground(t.FgSubtle).Render(task)
+						bodyLines = append(bodyLines, line)
+					}
+					if meta.JustStarted != "" {
+						line := t.S().Base.Foreground(t.Blue).Render("→ ") +
+							t.S().Base.Foreground(t.FgBase).Render(meta.JustStarted)
+						bodyLines = append(bodyLines, line)
+					}
+				}
+			}
+		}
 	}
 
-	return tr.renderWithParams(v, "Todos", args, func() string {
-		var params tools.TodosParams
-		if err := tr.unmarshalParams(v.call.Input, &params); err != nil {
-			return renderPlainContent(v, v.result.Content)
+	args := newParamBuilder().addMain(headerText).build()
+
+	return tr.renderWithParams(v, "To-Do", args, func() string {
+		if len(bodyLines) == 0 {
+			return ""
 		}
-
-		if len(params.Todos) == 0 {
-			return t.S().Base.Foreground(t.FgSubtle).Render("No tasks")
-		}
-
-		var lines []string
-		for _, todo := range params.Todos {
-			icon := "○" // pending
-			iconColor := t.FgMuted
-			textColor := t.FgBase
-
-			switch todo.Status {
-			case "in_progress":
-				icon = "◐"
-				iconColor = t.Blue
-				textColor = t.Blue
-			case "completed":
-				icon = "●"
-				iconColor = t.Green
-				textColor = t.FgSubtle
-			}
-
-			statusIcon := t.S().Base.Foreground(iconColor).Render(icon)
-
-			// Display active form if in progress, otherwise content
-			displayText := todo.Content
-			if todo.Status == "in_progress" && todo.ActiveForm != "" {
-				displayText = todo.ActiveForm
-			}
-
-			todoText := t.S().Base.Foreground(textColor).Render(displayText)
-			lines = append(lines, fmt.Sprintf("%s %s", statusIcon, todoText))
-		}
-
-		width := v.textWidth() - 2
-		result := strings.Join(lines, "\n")
-		return t.S().Base.
-			Width(width).
-			Render(result)
+		return strings.Join(bodyLines, "\n")
 	})
 }
