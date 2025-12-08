@@ -116,9 +116,14 @@ type chatPage struct {
 	splashFullScreen bool
 	isOnboarding     bool
 	isProjectInit    bool
+	promptQueue      int
+
+	// Todo spinner
+	todoSpinner spinner.Model
 }
 
 func New(app *app.App) ChatPage {
+	t := styles.CurrentTheme()
 	return &chatPage{
 		app:         app,
 		keyMap:      DefaultKeyMap(),
@@ -128,6 +133,10 @@ func New(app *app.App) ChatPage {
 		editor:      editor.New(app),
 		splash:      splash.New(),
 		focusedPane: PanelTypeSplash,
+		todoSpinner: spinner.New(
+			spinner.WithSpinner(spinner.MiniDot),
+			spinner.WithStyle(t.S().Base.Foreground(t.GreenDark)),
+		),
 	}
 }
 
@@ -166,6 +175,13 @@ func (p *chatPage) Init() tea.Cmd {
 
 func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	if p.session.ID != "" && p.app.AgentCoordinator != nil {
+		queueSize := p.app.AgentCoordinator.QueuedPrompts(p.session.ID)
+		if queueSize != p.promptQueue {
+			p.promptQueue = queueSize
+			cmds = append(cmds, p.SetSize(p.width, p.height))
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.KeyboardEnhancementsMsg:
 		p.keyboardEnhancements = msg
@@ -268,6 +284,22 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		p.editor = u.(editor.Editor)
 		return p, cmd
 	case pubsub.Event[session.Session]:
+		// Update local session if this event is for our session
+		if msg.Payload.ID == p.session.ID {
+			prevHasTodos := len(p.session.Todos) > 0
+			prevHasInProgress := p.hasInProgressTodo()
+			p.session = msg.Payload
+			newHasTodos := len(p.session.Todos) > 0
+			newHasInProgress := p.hasInProgressTodo()
+			// Resize if todo visibility changed
+			if prevHasTodos != newHasTodos {
+				cmds = append(cmds, p.SetSize(p.width, p.height))
+			}
+			// Start spinner if todo went in-progress
+			if !prevHasInProgress && newHasInProgress {
+				cmds = append(cmds, p.todoSpinner.Tick)
+			}
+		}
 		u, cmd := p.header.Update(msg)
 		p.header = u.(header.Header)
 		cmds = append(cmds, cmd)
@@ -311,6 +343,12 @@ func (p *chatPage) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 	case pubsub.Event[message.Message],
 		anim.StepMsg,
 		spinner.TickMsg:
+		// Update todo spinner if we have in-progress todos
+		if _, ok := msg.(spinner.TickMsg); ok && p.hasInProgressTodo() {
+			var cmd tea.Cmd
+			p.todoSpinner, cmd = p.todoSpinner.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 		if p.focusedPane == PanelTypeSplash {
 			u, cmd := p.splash.Update(msg)
 			p.splash = u.(splash.Splash)
@@ -474,19 +512,41 @@ func (p *chatPage) View() string {
 	} else {
 		messagesView := p.chat.View()
 		editorView := p.editor.View()
+
+		// Build pills row (todo first, then queue)
+		var pills []string
+		if len(p.session.Todos) > 0 {
+			pills = append(pills, todoPill(p.session.Todos, p.todoSpinner.View(), t))
+		}
+		if p.promptQueue > 0 {
+			pills = append(pills, queuePill(p.promptQueue, t))
+		}
+
 		if p.compact {
 			headerView := p.header.View()
-			chatView = lipgloss.JoinVertical(
-				lipgloss.Left,
-				headerView,
-				messagesView,
-				editorView,
-			)
+			views := []string{headerView, messagesView}
+			if len(pills) > 0 {
+				pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, addPillSpacing(pills)...)
+				views = append(views, t.S().Base.PaddingLeft(4).PaddingTop(1).Render(pillsRow))
+			}
+			views = append(views, editorView)
+			chatView = lipgloss.JoinVertical(lipgloss.Left, views...)
 		} else {
 			sidebarView := p.sidebar.View()
+			var messagesColumn string
+			if len(pills) > 0 {
+				pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, addPillSpacing(pills)...)
+				messagesColumn = lipgloss.JoinVertical(
+					lipgloss.Left,
+					messagesView,
+					t.S().Base.PaddingLeft(4).PaddingTop(1).Render(pillsRow),
+				)
+			} else {
+				messagesColumn = messagesView
+			}
 			messages := lipgloss.JoinHorizontal(
 				lipgloss.Left,
-				messagesView,
+				messagesColumn,
 				sidebarView,
 			)
 			chatView = lipgloss.JoinVertical(
@@ -650,14 +710,20 @@ func (p *chatPage) SetSize(width, height int) tea.Cmd {
 			cmds = append(cmds, p.editor.SetPosition(0, height-EditorHeight))
 		}
 	} else {
+		pillsHeight := 0
+		hasTodos := len(p.session.Todos) > 0
+		hasPills := p.promptQueue > 0 || hasTodos
+		if hasPills {
+			pillsHeight = pillHeight + 1 // +1 for padding top
+		}
 		if p.compact {
-			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight))
+			cmds = append(cmds, p.chat.SetSize(width, height-EditorHeight-HeaderHeight-pillsHeight))
 			p.detailsWidth = width - DetailsPositioning
 			cmds = append(cmds, p.sidebar.SetSize(p.detailsWidth-LeftRightBorders, p.detailsHeight-TopBottomBorders))
 			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
 			cmds = append(cmds, p.header.SetWidth(width-BorderWidth))
 		} else {
-			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight))
+			cmds = append(cmds, p.chat.SetSize(width-SideBarWidth, height-EditorHeight-pillsHeight))
 			cmds = append(cmds, p.editor.SetSize(width, EditorHeight))
 			cmds = append(cmds, p.sidebar.SetSize(SideBarWidth, height-EditorHeight))
 		}
@@ -682,19 +748,24 @@ func (p *chatPage) newSession() tea.Cmd {
 	)
 }
 
-func (p *chatPage) setSession(session session.Session) tea.Cmd {
-	if p.session.ID == session.ID {
+func (p *chatPage) setSession(sess session.Session) tea.Cmd {
+	if p.session.ID == sess.ID {
 		return nil
 	}
 
 	var cmds []tea.Cmd
-	p.session = session
+	p.session = sess
+
+	// Start spinner if there's an in-progress todo
+	if p.hasInProgressTodo() {
+		cmds = append(cmds, p.todoSpinner.Tick)
+	}
 
 	cmds = append(cmds, p.SetSize(p.width, p.height))
-	cmds = append(cmds, p.chat.SetSession(session))
-	cmds = append(cmds, p.sidebar.SetSession(session))
-	cmds = append(cmds, p.header.SetSession(session))
-	cmds = append(cmds, p.editor.SetSession(session))
+	cmds = append(cmds, p.chat.SetSession(sess))
+	cmds = append(cmds, p.sidebar.SetSession(sess))
+	cmds = append(cmds, p.header.SetSession(sess))
+	cmds = append(cmds, p.editor.SetSession(sess))
 
 	return tea.Sequence(cmds...)
 }
@@ -1196,4 +1267,14 @@ func (p *chatPage) isMouseOverChat(x, y int) bool {
 
 	// Check if mouse coordinates are within chat bounds
 	return x >= chatX && x < chatX+chatWidth && y >= chatY && y < chatY+chatHeight
+}
+
+// hasInProgressTodo returns true if there is at least one todo in progress.
+func (p *chatPage) hasInProgressTodo() bool {
+	for _, todo := range p.session.Todos {
+		if todo.Status == session.TodoStatusInProgress {
+			return true
+		}
+	}
+	return false
 }
