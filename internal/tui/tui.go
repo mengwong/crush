@@ -268,7 +268,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, util.CmdHandler(dialogs.OpenDialogMsg{
 			Model: quit.NewQuitDialog(),
 		})
-	case quit.QuitWithCursorMsg:
+	case quit.QuitMsg:
 		return a, tea.Sequence(
 			tea.Raw(ansi.CursorPosition(1, msg.Height)),
 			tea.Quit,
