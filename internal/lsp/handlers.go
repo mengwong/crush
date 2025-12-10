@@ -103,11 +103,24 @@ func HandleServerMessage(_ context.Context, method string, params json.RawMessag
 	}
 }
 
-// HandleDiagnostics handles diagnostic notifications from the LSP server
+// HandleDiagnostics handles diagnostic notifications from the LSP server.
 func HandleDiagnostics(client *Client, params json.RawMessage) {
 	var diagParams protocol.PublishDiagnosticsParams
 	if err := json.Unmarshal(params, &diagParams); err != nil {
 		slog.Error("Error unmarshaling diagnostics params", "error", err)
+		return
+	}
+
+	// Filter out diagnostics for files this LSP client doesn't handle.
+	// LSP servers may report diagnostics for unrelated files they discover
+	// in the workspace (e.g., Haskell LSP reporting errors on .md files).
+	path, err := diagParams.URI.Path()
+	if err != nil {
+		slog.Error("Failed to convert diagnostic URI to path", "uri", diagParams.URI, "error", err)
+		return
+	}
+	if !client.HandlesFile(path) {
+		slog.Debug("Ignoring diagnostics for file not handled by LSP", "lsp", client.name, "path", path)
 		return
 	}
 
