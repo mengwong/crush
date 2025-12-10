@@ -1300,7 +1300,7 @@ func prettifyToolName(name string) string {
 	case tools.SourcegraphToolName:
 		return "Sourcegraph"
 	case tools.TodosToolName:
-		return "Todos"
+		return "To-Do"
 	case tools.ViewToolName:
 		return "View"
 	case tools.WriteToolName:
