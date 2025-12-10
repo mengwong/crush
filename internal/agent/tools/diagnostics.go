@@ -63,6 +63,12 @@ func getDiagnostics(filePath string, lsps *csync.Map[string, *lsp.Client]) strin
 				slog.Error("Failed to convert diagnostic location URI to path", "uri", location, "error", err)
 				continue
 			}
+			// Skip diagnostics for files this LSP client doesn't handle.
+			// LSP servers may report diagnostics for unrelated files they
+			// discover in the workspace.
+			if !client.HandlesFile(path) {
+				continue
+			}
 			isCurrentFile := path == filePath
 			for _, diag := range diags {
 				formattedDiag := formatDiagnostic(path, diag, lspName)
