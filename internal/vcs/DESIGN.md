@@ -61,6 +61,26 @@ The VCS status in the sidebar refreshes via two mechanisms:
   - Doesn't spam git/jj commands
 - File change events are already part of Crush's event system (zero additional overhead)
 
+### Permission and Sandboxing
+
+**No Permission Prompts**
+- VCS detection uses `exec.Command` directly, bypassing Crush's agent tool permission system
+- Commands run silently in the background without user interaction
+- No entries in "allowed_tools" configuration needed
+
+**Sandboxing Considerations**
+- macOS App Sandbox: If Crush is sandboxed, git/jj commands may fail silently
+- Corporate Environments: Process monitoring tools may flag repeated exec calls
+- Graceful Degradation: All exec errors are ignored; VCS display simply shows nothing on failure
+- No Error Spam: Failed commands don't generate user-visible errors or logs
+
+**OS-Level Concerns**
+If running in highly restricted environments:
+- VCS detection will fail silently (no icons displayed)
+- No performance impact or repeated errors
+- No security prompts or permission dialogs
+- Consider disabling VCS display if it causes audit alerts
+
 ## Icon Reference
 
 ### Git Status Icons (Priority Order)
