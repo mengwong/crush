@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -58,6 +59,14 @@ type SessionFilesMsg struct {
 	Files []SessionFile
 }
 
+// VCSRefreshMsg is sent periodically to refresh VCS status.
+type VCSRefreshMsg struct{}
+
+const (
+	// VCSRefreshInterval is how often to refresh VCS status.
+	VCSRefreshInterval = 5 * time.Second
+)
+
 type Sidebar interface {
 	util.Model
 	layout.Sizeable
@@ -87,7 +96,14 @@ func New(history history.Service, lspClients *csync.Map[string, *lsp.Client], co
 }
 
 func (m *sidebarCmp) Init() tea.Cmd {
-	return nil
+	return m.vcsRefreshCmd()
+}
+
+// vcsRefreshCmd returns a command that schedules a VCS refresh after the configured interval.
+func (m *sidebarCmp) vcsRefreshCmd() tea.Cmd {
+	return tea.Tick(VCSRefreshInterval, func(time.Time) tea.Msg {
+		return VCSRefreshMsg{}
+	})
 }
 
 func (m *sidebarCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
@@ -99,9 +115,16 @@ func (m *sidebarCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case VCSRefreshMsg:
+		// Refresh VCS info and schedule the next refresh.
+		m.vcsInfo = vcsInfo()
+		return m, m.vcsRefreshCmd()
+
 	case chat.SessionClearedMsg:
 		m.session = session.Session{}
 	case pubsub.Event[history.File]:
+		// Refresh VCS info when files change, as this often means git status changed.
+		m.vcsInfo = vcsInfo()
 		return m, m.handleFileHistoryEvent(msg)
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
