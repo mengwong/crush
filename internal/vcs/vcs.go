@@ -81,6 +81,7 @@ func (d *detector) Detect(path string) (Info, error) {
 }
 
 // findVCSRoot walks up the directory tree looking for a VCS marker directory.
+// For Git, it also accepts .git as a file (worktrees and submodules).
 func findVCSRoot(startPath, markerDir string) (string, bool) {
 	path, err := filepath.Abs(startPath)
 	if err != nil {
@@ -89,8 +90,12 @@ func findVCSRoot(startPath, markerDir string) (string, bool) {
 
 	for {
 		vcsPath := filepath.Join(path, markerDir)
-		if info, err := os.Stat(vcsPath); err == nil && info.IsDir() {
-			return path, true
+		if info, err := os.Stat(vcsPath); err == nil {
+			// For .git, accept both directories and files (worktrees/submodules).
+			// For other VCS markers, require directories.
+			if info.IsDir() || markerDir == ".git" {
+				return path, true
+			}
 		}
 
 		parent := filepath.Dir(path)
