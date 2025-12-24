@@ -10,7 +10,8 @@ const (
 	ArrowRightIcon    string = "→"
 	CenterSpinnerIcon string = "⋯"
 	LoadingIcon       string = "⟳"
-	DocumentIcon      string = "🖼"
+	ImageIcon         string = "■"
+	TextIcon          string = "☰"
 	ModelIcon         string = "◇"
 
 	// VCS icons
