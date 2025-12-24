@@ -135,6 +135,12 @@ func (h *header) details(availWidth int) string {
 	cwd = ansi.Truncate(cwd, max(0, availWidth-lipgloss.Width(metadata)), "…")
 	cwd = s.Muted.Render(cwd)
 
+	// Add VCS info if available.
+	vcsInfo := util.VCSInfo()
+	if vcsInfo != "" {
+		cwd = cwd + " " + vcsInfo
+	}
+
 	return cwd + metadata
 }
 

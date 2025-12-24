@@ -600,11 +600,19 @@ func (s *splashCmp) View() string {
 		shortcutStyle := t.S().Base.Foreground(t.Success)
 
 		initFile := config.Get().Options.InitializeAs
+
+		// Build directory info with VCS status.
+		dirInfo := pathStyle.Render(s.cwd())
+		vcsInfo := util.VCSInfo()
+		if vcsInfo != "" {
+			dirInfo = lipgloss.JoinVertical(lipgloss.Left, dirInfo, pathStyle.Render(vcsInfo))
+		}
+
 		initText := lipgloss.JoinVertical(
 			lipgloss.Left,
 			titleStyle.Render("Would you like to initialize this project?"),
 			"",
-			pathStyle.Render(s.cwd()),
+			dirInfo,
 			"",
 			bodyStyle.Render("When I initialize your codebase I examine the project and put the"),
 			bodyStyle.Render(fmt.Sprintf("result into an %s file which serves as general context.", initFile)),
@@ -789,7 +797,16 @@ func (s *splashCmp) getMaxInfoWidth() int {
 func (s *splashCmp) cwdPart() string {
 	t := styles.CurrentTheme()
 	maxWidth := s.getMaxInfoWidth()
-	return t.S().Muted.Width(maxWidth).Render(s.cwd())
+
+	// Build parts: cwd and optionally vcs info.
+	cwdStr := t.S().Muted.Width(maxWidth).Render(s.cwd())
+	vcsInfo := util.VCSInfo()
+	if vcsInfo == "" {
+		return cwdStr
+	}
+
+	// Join cwd and vcs info on separate lines.
+	return lipgloss.JoinVertical(lipgloss.Left, cwdStr, vcsInfo)
 }
 
 func (s *splashCmp) cwd() string {

@@ -28,7 +28,6 @@ import (
 	"github.com/charmbracelet/crush/internal/tui/components/mcp"
 	"github.com/charmbracelet/crush/internal/tui/styles"
 	"github.com/charmbracelet/crush/internal/tui/util"
-	"github.com/charmbracelet/crush/internal/vcs"
 	"github.com/charmbracelet/crush/internal/version"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -117,14 +116,14 @@ func (m *sidebarCmp) Update(msg tea.Msg) (util.Model, tea.Cmd) {
 
 	case VCSRefreshMsg:
 		// Refresh VCS info and schedule the next refresh.
-		m.vcsInfo = vcsInfo()
+		m.vcsInfo = util.VCSInfo()
 		return m, m.vcsRefreshCmd()
 
 	case chat.SessionClearedMsg:
 		m.session = session.Session{}
 	case pubsub.Event[history.File]:
 		// Refresh VCS info when files change, as this often means git status changed.
-		m.vcsInfo = vcsInfo()
+		m.vcsInfo = util.VCSInfo()
 		return m, m.handleFileHistoryEvent(msg)
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.UpdatedEvent {
@@ -296,7 +295,7 @@ func (m *sidebarCmp) loadSessionFiles() tea.Msg {
 func (m *sidebarCmp) SetSize(width, height int) tea.Cmd {
 	m.logo = m.logoBlock()
 	m.cwd = cwd()
-	m.vcsInfo = vcsInfo()
+	m.vcsInfo = util.VCSInfo()
 	m.width = width
 	m.height = height
 	return nil
@@ -639,69 +638,4 @@ func cwd() string {
 	cwd := config.Get().WorkingDir()
 	t := styles.CurrentTheme()
 	return t.S().Muted.Render(home.Short(cwd))
-}
-
-func vcsInfo() string {
-	workingDir := config.Get().WorkingDir()
-	detector := vcs.NewDetector()
-	info, err := detector.Detect(workingDir)
-	if err != nil || info.Type == vcs.TypeNone {
-		return ""
-	}
-
-	t := styles.CurrentTheme()
-
-	// Determine the status icon and render it with the appropriate color based on Git status (priority order).
-	var styledIcon string
-
-	if info.Type == vcs.TypeGit {
-		status := info.Status
-		switch {
-		case status.HasConflicts:
-			styledIcon = t.S().Base.Foreground(t.Error).Render(styles.GitConflictIcon)
-		case status.IsDetached:
-			styledIcon = t.S().Base.Foreground(t.Warning).Render(styles.GitDetachedIcon)
-		case status.HasStaged:
-			styledIcon = t.S().Base.Foreground(t.Warning).Render(styles.GitStagedIcon)
-		case status.HasUncommitted:
-			styledIcon = t.S().Base.Foreground(t.Warning).Render(styles.GitDirtyIcon)
-		case status.HasUntracked:
-			styledIcon = t.S().Base.Foreground(t.FgSubtle).Render(styles.GitUntrackedIcon)
-		case status.AheadCount > 0 && status.BehindCount > 0:
-			styledIcon = t.S().Base.Foreground(t.Warning).Render(styles.GitDivergentIcon)
-		case status.HasUnpushed || status.AheadCount > 0:
-			styledIcon = t.S().Base.Foreground(t.Info).Render(styles.GitUnpushedIcon)
-		case status.BehindCount > 0:
-			styledIcon = t.S().Base.Foreground(t.Info).Render(styles.GitBehindIcon)
-		default:
-			// Clean repository - everything committed and pushed.
-			styledIcon = t.S().Base.Foreground(t.Success).Render(styles.GitCleanIcon)
-		}
-	} else if info.Type == vcs.TypeJujutsu {
-		status := info.Status
-		// Apply similar status logic for Jujutsu.
-		switch {
-		case status.HasConflicts:
-			styledIcon = t.S().Base.Foreground(t.Error).Render(styles.GitConflictIcon)
-		case status.HasUncommitted:
-			styledIcon = t.S().Base.Foreground(t.Warning).Render(styles.GitDirtyIcon)
-		default:
-			// Clean or unknown state - use jj icon.
-			styledIcon = t.S().Base.Foreground(t.Success).Render("jj")
-		}
-	} else {
-		styledIcon = t.S().Base.Foreground(t.FgMuted).Render(string(info.Type))
-	}
-
-	// Display branch/change name for Git and Jujutsu, repo name for other VCS.
-	var displayName string
-	if (info.Type == vcs.TypeGit || info.Type == vcs.TypeJujutsu) && info.Status.CurrentBranch != "" {
-		displayName = info.Status.CurrentBranch
-	} else {
-		displayName = info.RepoName
-	}
-
-	styledName := t.S().Muted.Render(displayName)
-
-	return fmt.Sprintf("%s %s", styledIcon, styledName)
 }
