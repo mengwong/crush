@@ -51,6 +51,7 @@ type Service interface {
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
 	SkipRequests() bool
+	AllowedTools() []string
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
 
@@ -218,6 +219,10 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip
+}
+
+func (s *permissionService) AllowedTools() []string {
+	return s.allowedTools
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {

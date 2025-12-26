@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -154,9 +155,17 @@ func bashDescription(attribution *config.Attribution, modelName string) string {
 	return out.String()
 }
 
-func blockFuncs() []shell.BlockFunc {
+func blockFuncs(allowedTools []string) []shell.BlockFunc {
+	// Filter banned commands by removing those in allowedTools
+	filteredBannedCommands := make([]string, 0, len(bannedCommands))
+	for _, cmd := range bannedCommands {
+		if !slices.Contains(allowedTools, cmd) {
+			filteredBannedCommands = append(filteredBannedCommands, cmd)
+		}
+	}
+
 	return []shell.BlockFunc{
-		shell.CommandsBlocker(bannedCommands),
+		shell.CommandsBlocker(filteredBannedCommands),
 
 		// System package managers
 		shell.ArgumentsBlocker("apk", []string{"add"}, nil),
@@ -194,6 +203,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if params.Command == "" {
 				return fantasy.NewTextErrorResponse("missing command"), nil
 			}
+
+			// Get allowed tools from permissions service
+			allowedTools := permissions.AllowedTools()
 
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
@@ -237,7 +249,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(allowedTools), params.Command, params.Description)
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -292,7 +304,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// Start with detached context so it can survive if moved to background
 			bgManager := shell.GetBackgroundShellManager()
 			bgManager.Cleanup()
-			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+			bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(allowedTools), params.Command, params.Description)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}
