@@ -11,6 +11,74 @@
 
 <p align="center"><img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
 
+---
+
+## 🍴 This is a Fork
+
+**This is a personal fork of [charmbracelet/crush](https://github.com/charmbracelet/crush) with experimental features.**
+
+If you want the official, stable version of Crush, please use the upstream repository. This fork contains patches that may or may not be merged upstream.
+
+### Additional Features in This Fork
+
+This fork includes the following enhancements over upstream:
+
+#### VCS Status Display
+- **Visual VCS indicators** in sidebar, header, and splash screens
+- Shows current **branch name** (Git) or **change ID** (Jujutsu)
+- **Status icons** following oh-my-zsh conventions:
+  - `✖` (red) - Merge conflicts
+  - `⚠` (yellow) - Detached HEAD (Git)
+  - `●` (yellow) - Staged changes (Git)
+  - `✗` (yellow) - Uncommitted changes
+  - `?` (muted) - Untracked files (Git)
+  - `↕` `↑` `↓` (blue) - Remote tracking status (Git)
+  - `✓` (green) - Clean working tree
+- **Git worktree detection** for proper status reporting
+- See [`internal/vcs/DESIGN.md`](internal/vcs/DESIGN.md) for implementation details
+
+#### Improved Quit Behavior
+- **Terminal-friendly quit** - mimics `less -X` behavior by leaving content on screen after exit
+- **Cursor positioning** - moves cursor to bottom before quit to prevent screen clearing
+- **Goodbye messages** - randomized friendly quips on exit
+- **Proper cleanup sequencing** - ensures dialogs clear before quit
+
+#### Configuration Enhancements
+- **`allowed_tools` bypass** - tools in `permissions.allowed_tools` can bypass the banned commands list (e.g., allow `ssh` even though it's normally blocked)
+
+#### LSP Improvements
+- **Diagnostic filtering** - only shows diagnostics for files the LSP actually handles
+
+### Keeping This Fork Up to Date
+
+To stay current with upstream while preserving these patches:
+
+```bash
+# Add upstream remote (if not already added)
+git remote add upstream https://github.com/charmbracelet/crush.git
+
+# Fetch latest from upstream
+git fetch upstream
+
+# Merge upstream changes into your local fork
+git pull upstream main
+
+# If there are conflicts, resolve them and continue
+git add .
+git commit -m "Merge upstream/main"
+
+# Push to your fork
+git push origin main
+```
+
+**Note:** Some patches may conflict with upstream changes. The maintainer of this fork will attempt to keep it reasonably up to date, but no guarantees are provided.
+
+### Contributing
+
+Improvements to these patches are welcome via pull requests to this fork. However, if you'd like to see these features in the official Crush, please consider submitting them to the [upstream repository](https://github.com/charmbracelet/crush) instead.
+
+---
+
 ## Features
 
 - **Multi-Model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible APIs
