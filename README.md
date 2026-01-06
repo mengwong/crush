@@ -51,25 +51,27 @@ This fork includes the following enhancements over upstream:
 
 ### Keeping This Fork Up to Date
 
+This fork uses a **rebase workflow** (configured via `git config pull.rebase true`) to maintain a clean linear history.
+
 To stay current with upstream while preserving these patches:
 
 ```bash
 # Add upstream remote (if not already added)
 git remote add upstream https://github.com/charmbracelet/crush.git
 
-# Fetch latest from upstream
+# Fetch and rebase on latest upstream
 git fetch upstream
-
-# Merge upstream changes into your local fork
-git pull upstream main
+git pull upstream main  # rebases due to pull.rebase=true
 
 # If there are conflicts, resolve them and continue
 git add .
-git commit -m "Merge upstream/main"
+git rebase --continue
 
-# Push to your fork
-git push origin main
+# Force-push to your fork (required after rebase)
+git push origin main --force-with-lease
 ```
+
+**Important:** The rebase workflow rewrites commit hashes, so you **must** use `--force-with-lease` when pushing to origin. This is safe for personal forks but should not be used on shared branches.
 
 **Note:** Some patches may conflict with upstream changes. The maintainer of this fork will attempt to keep it reasonably up to date, but no guarantees are provided.
 
